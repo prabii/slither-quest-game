@@ -11,15 +11,20 @@ const { BreethClient } = require('./breeth');
 
 const PORT = parseInt(process.env.PORT || '3001', 10);
 const TICK_MS = 1000 / 25; // 25 ticks/sec → 40 ms
+const ROOM_PASSWORD = process.env.ROOM_PASSWORD || null; // null = no password required
 
 // ─── Express + WebSocket ─────────────────────────────────────────────────────
 
+const path = require('path');
 const app = express();
 app.use(express.json());
 app.use((_, res, next) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
   next();
 });
+
+// Serve built client (npm run build in /client → /client/dist)
+app.use(express.static(path.join(__dirname, '../client/dist')));
 
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server, perMessageDeflate: true });
@@ -208,6 +213,12 @@ wss.on('connection', ws => {
     try { msg = JSON.parse(raw); } catch { return; }
 
     if (msg.type === 'join') {
+      // Password check (if ROOM_PASSWORD is set)
+      if (ROOM_PASSWORD && msg.password !== ROOM_PASSWORD) {
+        send(ws, { type: 'error', code: 'wrong_password', message: 'Wrong room password.' });
+        return;
+      }
+
       const name = String(msg.name || 'Anonymous').slice(0, 20).trim() || 'Anonymous';
       players.set(clientId, { name });
 
@@ -273,6 +284,7 @@ app.get('/api/health', (_req, res) => {
     snakes: game.snakes.size,
     valkey: !!valkey,
     breeth: breeth.enabled,
+    passwordRequired: !!ROOM_PASSWORD,
   });
 });
 

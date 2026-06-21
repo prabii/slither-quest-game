@@ -4,12 +4,17 @@ import HUD from './components/HUD.jsx';
 import JoinScreen from './components/JoinScreen.jsx';
 import DeathScreen from './components/DeathScreen.jsx';
 
-const WS_URL = import.meta.env.VITE_WS_URL || 'ws://localhost:3001';
+// Auto-detect server from current page URL so one build works behind any tunnel
+const WS_URL = import.meta.env.VITE_WS_URL ||
+  (typeof window !== 'undefined'
+    ? (window.location.protocol === 'https:' ? 'wss://' : 'ws://') + window.location.host
+    : 'ws://localhost:3001');
 
 export default function App() {
   const wsRef = useRef(null);
   const [phase, setPhase] = useState('join');   // join | playing | dead
   const [playerId, setPlayerId] = useState(null);
+  const [joinError, setJoinError] = useState(null);
   const [greeting, setGreeting] = useState(null);
   const [snapshot, setSnapshot] = useState(null);
   const [leaderboard, setLeaderboard] = useState([]);
@@ -43,8 +48,13 @@ export default function App() {
           setPlayerId(msg.id);
           playerIdRef.current = msg.id;
           setGreeting(msg.greeting);
+          setJoinError(null);
           setPhase('playing');
           phaseRef.current = 'playing';
+        }
+
+        if (msg.type === 'error') {
+          if (msg.code === 'wrong_password') setJoinError('Wrong password — try again.');
         }
 
         if (msg.type === 'snapshot') {
@@ -97,9 +107,9 @@ export default function App() {
 
   // ─── Join / Respawn ─────────────────────────────────────────────────────────
 
-  const handleJoin = useCallback((name) => {
+  const handleJoin = useCallback((name, password) => {
     if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
-      wsRef.current.send(JSON.stringify({ type: 'join', name }));
+      wsRef.current.send(JSON.stringify({ type: 'join', name, password: password || '' }));
     }
   }, []);
 
@@ -114,7 +124,7 @@ export default function App() {
   return (
     <div style={{ width: '100%', height: '100%', position: 'relative' }}>
       {phase === 'join' && (
-        <JoinScreen onJoin={handleJoin} />
+        <JoinScreen onJoin={handleJoin} error={joinError} />
       )}
 
       {(phase === 'playing' || phase === 'dead') && (
