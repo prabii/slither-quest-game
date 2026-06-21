@@ -71,9 +71,9 @@ export default function AnimatedBg() {
 
       // ── Background ──
       const rg = ctx.createRadialGradient(W / 2, H * 0.42, 0, W / 2, H * 0.42, Math.max(W, H) * 0.85);
-      rg.addColorStop(0, '#0d1b3e');
-      rg.addColorStop(0.5, '#070e22');
-      rg.addColorStop(1, '#020610');
+      rg.addColorStop(0, '#0a1228');
+      rg.addColorStop(0.5, '#060914');
+      rg.addColorStop(1, '#03060f');
       ctx.fillStyle = rg;
       ctx.fillRect(0, 0, W, H);
 

@@ -122,7 +122,7 @@ export default function ArenaPanel() {
       <div style={{
         background: 'rgba(6,12,26,0.7)',
         border: '1px solid rgba(0,245,255,0.12)',
-        borderTop: '2px solid rgba(0,245,255,0.4)',
+        borderTop: '2px solid rgba(0,212,170,0.5)',
         borderRadius: 14, padding: '20px 22px',
         display: 'flex', flexDirection: 'column', gap: 14,
       }}>
