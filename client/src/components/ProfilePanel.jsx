@@ -6,14 +6,15 @@ const fmtTime = sec => {
   return m > 0 ? `${m}m ${s}s` : `${s}s`;
 };
 
-function Divider({ label }) {
+function SectionLabel({ children }) {
   return (
     <div style={{
-      display: 'flex', alignItems: 'center', gap: 12,
+      display: 'flex', alignItems: 'center', gap: 10,
       fontSize: 9, fontWeight: 800, letterSpacing: 3, color: '#334155',
+      marginBottom: 14,
     }}>
       <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.05)' }} />
-      {label}
+      {children}
       <div style={{ flex: 1, height: 1, background: 'rgba(255,255,255,0.05)' }} />
     </div>
   );
@@ -22,98 +23,118 @@ function Divider({ label }) {
 function StatCard({ icon, label, value, color }) {
   return (
     <div style={{
-      background: 'rgba(6,12,26,0.7)',
-      border: `1px solid ${color}20`,
+      background: 'rgba(6,12,26,0.75)',
+      border: `1px solid ${color}22`,
       borderTop: `2px solid ${color}`,
-      borderRadius: 12,
-      padding: '16px 18px',
-      display: 'flex', flexDirection: 'column', gap: 6,
+      borderRadius: 14,
+      padding: '18px 16px 14px',
+      display: 'flex', flexDirection: 'column', gap: 8,
+      position: 'relative', overflow: 'hidden',
     }}>
-      <div style={{ fontSize: 20 }}>{icon}</div>
+      {/* Glow bleed */}
       <div style={{
-        fontSize: 28, fontWeight: 900, color,
+        position: 'absolute', top: 0, left: 0, right: 0, height: 40,
+        background: `linear-gradient(180deg, ${color}0e, transparent)`,
+        pointerEvents: 'none',
+      }} />
+      <span style={{ fontSize: 22, lineHeight: 1 }}>{icon}</span>
+      <div style={{
+        fontSize: 30, fontWeight: 900, color,
         fontVariantNumeric: 'tabular-nums', lineHeight: 1,
-      }}>
-        {value}
-      </div>
-      <div style={{ fontSize: 9, color: '#475569', letterSpacing: 2, fontWeight: 700 }}>{label}</div>
+        textShadow: `0 0 20px ${color}55`,
+      }}>{value}</div>
+      <div style={{ fontSize: 9, color: '#475569', letterSpacing: 2.5, fontWeight: 700 }}>{label}</div>
     </div>
   );
 }
 
-function AchCard({ ach, unlocked }) {
+function AchCard({ ach, isUnlocked }) {
   return (
     <div style={{
-      display: 'flex', alignItems: 'center', gap: 14,
-      background: unlocked ? 'rgba(6,12,26,0.8)' : 'rgba(6,12,26,0.35)',
-      border: `1px solid ${unlocked ? ach.color + '44' : 'rgba(255,255,255,0.05)'}`,
+      display: 'flex', alignItems: 'center', gap: 16,
+      background: isUnlocked ? 'rgba(6,12,26,0.85)' : 'rgba(6,12,26,0.3)',
+      border: `1px solid ${isUnlocked ? ach.color + '50' : 'rgba(255,255,255,0.04)'}`,
       borderRadius: 12, padding: '14px 18px',
       position: 'relative', overflow: 'hidden',
-      filter: unlocked ? 'none' : 'grayscale(0.85)',
-      opacity: unlocked ? 1 : 0.4,
-      boxShadow: unlocked ? `0 0 22px ${ach.glow}` : 'none',
-      transition: 'box-shadow 0.3s',
+      opacity: isUnlocked ? 1 : 0.38,
+      boxShadow: isUnlocked ? `0 0 24px ${ach.glow}` : 'none',
+      transition: 'all 0.3s',
     }}>
-      {/* Shimmer on unlocked */}
-      {unlocked && (
+      {isUnlocked && (
         <div style={{
           position: 'absolute', inset: 0, pointerEvents: 'none',
-          background: `linear-gradient(105deg, transparent 35%, ${ach.color}12 55%, transparent 75%)`,
-          animation: 'achShimmer 3.5s infinite',
+          background: `linear-gradient(110deg, transparent 30%, ${ach.color}10 55%, transparent 75%)`,
+          animation: 'achShimmer 3.5s ease infinite',
         }} />
       )}
-      <span style={{ fontSize: 28, flexShrink: 0, position: 'relative' }}>{ach.icon}</span>
-      <div style={{ flex: 1, position: 'relative' }}>
-        <div style={{ fontSize: 13, fontWeight: 800, color: unlocked ? '#f1f5f9' : '#475569' }}>
+      <span style={{ fontSize: 30, flexShrink: 0, position: 'relative', filter: isUnlocked ? 'none' : 'grayscale(1)' }}>
+        {ach.icon}
+      </span>
+      <div style={{ flex: 1, position: 'relative', minWidth: 0 }}>
+        <div style={{ fontSize: 13, fontWeight: 800, color: isUnlocked ? '#f1f5f9' : '#334155' }}>
           {ach.name}
         </div>
-        <div style={{ fontSize: 11, color: '#475569', marginTop: 2 }}>{ach.desc}</div>
+        <div style={{ fontSize: 11, color: '#475569', marginTop: 3 }}>{ach.desc}</div>
       </div>
-      {unlocked && (
-        <div style={{
-          position: 'relative',
-          fontSize: 9, letterSpacing: 1.5, fontWeight: 800, color: ach.color,
-          background: `${ach.color}18`, borderRadius: 20, padding: '3px 10px',
-        }}>
-          DONE
-        </div>
-      )}
-      {!unlocked && (
-        <div style={{ position: 'relative', fontSize: 16, color: '#1e293b' }}>
-          {'\uD83D\uDD12'}
-        </div>
-      )}
+      <div style={{ position: 'relative', flexShrink: 0 }}>
+        {isUnlocked ? (
+          <div style={{
+            fontSize: 9, letterSpacing: 1.5, fontWeight: 800, color: ach.color,
+            background: `${ach.color}18`, border: `1px solid ${ach.color}30`,
+            borderRadius: 20, padding: '4px 10px',
+          }}>DONE</div>
+        ) : (
+          <span style={{ fontSize: 18, opacity: 0.3 }}>🔒</span>
+        )}
+      </div>
     </div>
   );
 }
 
 export default function ProfilePanel({ stats, unlocked }) {
   const avg = stats.gamesPlayed > 0 ? Math.round(stats.totalScore / stats.gamesPlayed) : 0;
+  const doneCount = [...unlocked].length;
 
   return (
-    <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-      {/* Primary stats */}
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 26 }}>
+
+      {/* ── Stats ── */}
       <div>
-        <Divider label="PLAYER STATS" />
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10, marginTop: 14 }}>
-          <StatCard icon="\uD83C\uDFAE" label="GAMES PLAYED"     value={stats.gamesPlayed}  color="#00f5ff" />
-          <StatCard icon="\u2B50"       label="HIGHEST SCORE"    value={stats.highScore}    color="#fbbf24" />
-          <StatCard icon="\uD83D\uDC51" label="BEST RANK"        value={stats.bestRank !== null ? `#${stats.bestRank}` : '--'} color="#a855f7" />
-          <StatCard icon="\u23F1\uFE0F" label="LONGEST SURVIVAL" value={fmtTime(stats.highSurvivalSec)} color="#22c55e" />
+        <SectionLabel>PLAYER STATS</SectionLabel>
+        <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+          <StatCard icon="🎮" label="GAMES PLAYED"     value={stats.gamesPlayed}  color="#00f5ff" />
+          <StatCard icon="⭐" label="HIGHEST SCORE"    value={stats.highScore}    color="#fbbf24" />
+          <StatCard icon="👑" label="BEST RANK"        value={stats.bestRank !== null ? `#${stats.bestRank}` : '--'} color="#a855f7" />
+          <StatCard icon="⏱️" label="LONGEST SURVIVAL" value={fmtTime(stats.highSurvivalSec)} color="#22c55e" />
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: 10, marginTop: 10 }}>
-          <StatCard icon="\uD83D\uDC80" label="TOTAL KILLS"   value={stats.totalKills} color="#ef4444" />
-          <StatCard icon="\uD83D\uDCC8" label="AVG SCORE"     value={avg}              color="#f97316" />
-          <StatCard icon="\uD83D\uDC0D" label="RECORD LENGTH" value={stats.highLength} color="#06b6d4" />
+          <StatCard icon="💀" label="TOTAL KILLS"   value={stats.totalKills} color="#ef4444" />
+          <StatCard icon="📈" label="AVG SCORE"     value={avg}              color="#f97316" />
+          <StatCard icon="🐍" label="RECORD LENGTH" value={stats.highLength} color="#06b6d4" />
         </div>
       </div>
 
-      {/* Achievements */}
+      {/* ── Achievements ── */}
       <div>
-        <Divider label={`ACHIEVEMENTS ${[...unlocked].length}/${ACHIEVEMENTS.length}`} />
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 14 }}>
+        <SectionLabel>ACHIEVEMENTS {doneCount}/{ACHIEVEMENTS.length}</SectionLabel>
+        {/* Progress bar */}
+        <div style={{ marginBottom: 14 }}>
+          <div style={{ height: 4, background: 'rgba(255,255,255,0.06)', borderRadius: 4, overflow: 'hidden' }}>
+            <div style={{
+              height: '100%', borderRadius: 4,
+              width: `${(doneCount / ACHIEVEMENTS.length) * 100}%`,
+              background: 'linear-gradient(90deg, #00f5ff, #a855f7)',
+              transition: 'width 0.5s ease',
+              boxShadow: '0 0 8px rgba(0,245,255,0.5)',
+            }} />
+          </div>
+          <div style={{ fontSize: 9, color: '#475569', marginTop: 5, textAlign: 'right', letterSpacing: 1 }}>
+            {doneCount === ACHIEVEMENTS.length ? '🎉 ALL UNLOCKED' : `${ACHIEVEMENTS.length - doneCount} remaining`}
+          </div>
+        </div>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
           {ACHIEVEMENTS.map(a => (
-            <AchCard key={a.id} ach={a} unlocked={unlocked.has(a.id)} />
+            <AchCard key={a.id} ach={a} isUnlocked={unlocked.has(a.id)} />
           ))}
         </div>
       </div>
