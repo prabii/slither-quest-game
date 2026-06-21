@@ -3,11 +3,12 @@
 const { GameEngine } = require('./game');
 const WebSocket = require('ws');
 
-const ROOM_CLEANUP_MS = 30_000; // delete room 30s after last player leaves
-const MAX_ROOMS = 50;
+const ROOM_CLEANUP_MS  = 30_000;
+const MAX_ROOMS        = 50;
+const GAME_DURATION_MS = 5 * 60 * 1000; // 5-minute rounds
 
 function genCode() {
-  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'; // no 0/O/I/1 confusion
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   return Array.from({ length: 4 }, () => chars[Math.floor(Math.random() * chars.length)]).join('');
 }
 
@@ -15,16 +16,43 @@ function genCode() {
 
 class Room {
   constructor(code, roomPassword) {
-    this.code        = code;
-    this.password    = roomPassword || null;
-    this.game        = new GameEngine();
-    this.clients     = new Map();  // clientId → ws
-    this.players     = new Map();  // clientId → { name }
-    this.leaderboard = [];
-    this.lastPersist = 0;
-    this.createdAt   = Date.now();
+    this.code          = code;
+    this.password      = roomPassword || null;
+    this.game          = new GameEngine();
+    this.clients       = new Map();   // clientId → ws
+    this.players       = new Map();   // clientId → { name }
+    this.leaderboard   = [];
+    this.lastPersist   = 0;
+    this.createdAt     = Date.now();
     this._cleanupTimer = null;
+
+    // 5-minute round timer
+    this.gameStartMs     = null;
+    this.inIntermission  = false;
   }
+
+  // ── Timer ──────────────────────────────────────────────────────────────────
+
+  startRound() {
+    this.gameStartMs    = Date.now();
+    this.inIntermission = false;
+  }
+
+  timeLeftMs() {
+    if (!this.gameStartMs || this.inIntermission) return GAME_DURATION_MS;
+    return Math.max(0, GAME_DURATION_MS - (Date.now() - this.gameStartMs));
+  }
+
+  shouldEndGame() {
+    return (
+      this.gameStartMs !== null &&
+      !this.inIntermission &&
+      this.clients.size > 0 &&
+      this.timeLeftMs() === 0
+    );
+  }
+
+  // ── Client management ──────────────────────────────────────────────────────
 
   addClient(clientId, ws) {
     this.clients.set(clientId, ws);
@@ -85,13 +113,16 @@ class RoomManager {
   }
 
   list() {
-    return Array.from(this.rooms.values()).map(r => ({
-      code: r.code,
-      players: r.clients.size,
-      passwordRequired: !!r.password,
-      createdAt: r.createdAt,
-    }));
+    return Array.from(this.rooms.values())
+      .filter(r => !r.inIntermission)
+      .map(r => ({
+        code:             r.code,
+        players:          r.clients.size,
+        passwordRequired: !!r.password,
+        timeLeftMs:       r.timeLeftMs(),
+        createdAt:        r.createdAt,
+      }));
   }
 }
 
-module.exports = { RoomManager };
+module.exports = { RoomManager, GAME_DURATION_MS };

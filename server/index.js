@@ -9,6 +9,7 @@ const crypto   = require('crypto');
 const path     = require('path');
 const { v4: uuidv4 } = require('uuid');
 const { RoomManager } = require('./room-manager');
+const { GameEngine }  = require('./game');
 const { BreethClient } = require('./breeth');
 
 const PORT    = parseInt(process.env.PORT || '3001', 10);
@@ -163,7 +164,41 @@ setInterval(() => {
       else room.leaderboard = computeLeaderboard(snapshot);
     }
 
-    room.broadcastAll({ type: 'snapshot', data: snapshot, leaderboard: room.leaderboard });
+    room.broadcastAll({ type: 'snapshot', data: snapshot, leaderboard: room.leaderboard, timeLeftMs: room.timeLeftMs() });
+
+    // ── 5-minute round end ──────────────────────────────────────────────────
+    if (room.shouldEndGame()) {
+      room.inIntermission = true;
+      const finalLB = [...snapshot.snakes]
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 10)
+        .map(s => ({ id: s.id, name: s.name, score: s.score }));
+      const winner = finalLB[0] || null;
+
+      room.broadcastAll({ type: 'game_over', leaderboard: finalLB, winner, nextRoundIn: 10 });
+      console.log(`[Room] ${room.code} round ended. Winner: ${winner?.name || 'none'}`);
+
+      // Persist final leaderboard to Valkey
+      if (valkey && finalLB.length > 0) {
+        const pipe = valkey.pipeline();
+        for (const s of finalLB) {
+          pipe.zadd(`game:${room.code}:leaderboard`, s.score, s.id);
+        }
+        pipe.exec().catch(() => {});
+      }
+
+      // Auto-reset after 10 seconds — new round for all players
+      setTimeout(() => {
+        if (!roomManager.rooms.has(room.code)) return; // room was deleted
+        room.game = new GameEngine();
+        room.startRound();
+        for (const [cId, player] of room.players) {
+          room.game.addSnake(cId, player.name);
+          room.send(cId, { type: 'respawned', id: cId });
+        }
+        console.log(`[Room] ${room.code} new round started.`);
+      }, 10_000);
+    }
   }
 }, TICK_MS);
 
@@ -220,6 +255,7 @@ wss.on('connection', (ws) => {
       room.players.set(clientId, { name });
       room.game.addSnake(clientId, name);
       clientRoom.set(clientId, room.code);
+      room.startRound(); // begin 5-minute timer
 
       let greeting = null;
       try { greeting = await breeth.recallPlayer(name); } catch (_) {}

@@ -1,319 +1,497 @@
 import { useState, useEffect, useCallback } from 'react';
+import AnimatedBg from './AnimatedBg.jsx';
+import ProfilePanel from './ProfilePanel.jsx';
+import ArenaPanel from './ArenaPanel.jsx';
+import HallOfFame from './HallOfFame.jsx';
+import { audio } from '../audio/AudioManager.js';
 
-const card = {
-  position: 'relative',
-  background: 'rgba(10,15,30,0.95)',
-  border: '1px solid rgba(100,200,255,0.2)',
-  borderRadius: 18,
-  padding: '40px 48px',
-  display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 24,
-  backdropFilter: 'blur(20px)',
-  boxShadow: '0 0 60px rgba(0,100,255,0.1)',
-  width: 380,
-};
+// Derive HTTP base from WS env var for API calls
+const HTTP_BASE = (() => {
+  const ws = import.meta.env.VITE_WS_URL || '';
+  if (ws) return ws.replace('wss://', 'https://').replace('ws://', 'http://');
+  return typeof window !== 'undefined' ? window.location.origin : 'http://localhost:3001';
+})();
 
-const inputBase = {
-  background: 'rgba(255,255,255,0.06)',
-  border: '1px solid rgba(255,255,255,0.15)',
-  borderRadius: 10, padding: '11px 14px',
-  color: '#fff', fontSize: 15,
+const SECTIONS = [
+  { id: 'play',    label: 'PLAY',         icon: '\u25B6\uFE0F' },
+  { id: 'profile', label: 'PROFILE',      icon: '\uD83D\uDC64' },
+  { id: 'arena',   label: 'ARENA',        icon: '\uD83C\uDFA8' },
+  { id: 'hall',    label: 'HALL OF FAME', icon: '\uD83C\uDFC6' },
+];
+
+// ── Design tokens ─────────────────────────────────────────────────────────────
+
+const inputStyle = {
+  background: 'rgba(255,255,255,0.05)',
+  border: '1px solid rgba(255,255,255,0.1)',
+  borderRadius: 10, padding: '12px 16px',
+  color: '#f1f5f9', fontSize: 15,
   outline: 'none', width: '100%',
+  transition: 'border-color 0.2s',
+  fontFamily: 'inherit',
 };
 
-const btn = (active, accent = '#1a6bff') => ({
-  background: active ? `linear-gradient(135deg, ${accent}, #00d4aa)` : 'rgba(255,255,255,0.08)',
-  border: 'none', borderRadius: 10,
-  padding: '12px', color: '#fff',
-  fontSize: 15, fontWeight: 700,
-  cursor: active ? 'pointer' : 'not-allowed',
-  width: '100%', transition: 'opacity 0.2s',
-});
+// ── Shared components ─────────────────────────────────────────────────────────
 
-function Input({ label, ...props }) {
+function FInput({ label, hint, style: extra, ...props }) {
+  const [focused, setFocused] = useState(false);
   return (
     <div style={{ width: '100%' }}>
-      {label && <div style={{ fontSize: 11, color: '#667', marginBottom: 5, letterSpacing: 1 }}>{label}</div>}
-      <input style={inputBase} {...props} />
+      {label && (
+        <div style={{
+          fontSize: 9, fontWeight: 800, letterSpacing: 3, marginBottom: 7,
+          color: focused ? '#00f5ff' : '#475569', transition: 'color 0.2s',
+        }}>{label}</div>
+      )}
+      <input
+        style={{ ...inputStyle, borderColor: focused ? 'rgba(0,245,255,0.35)' : 'rgba(255,255,255,0.09)', ...extra }}
+        onFocus={() => setFocused(true)}
+        onBlur={() => setFocused(false)}
+        {...props}
+      />
+      {hint && <div style={{ fontSize: 10, color: '#374151', marginTop: 5 }}>{hint}</div>}
     </div>
   );
 }
 
-function ErrorBox({ msg }) {
+function Btn({ children, onClick, disabled, accent = '#00f5ff', secondary = false }) {
+  return (
+    <button
+      onClick={() => { if (!disabled) { audio.click(); onClick?.(); } }}
+      disabled={disabled}
+      style={{
+        width: '100%', padding: '13px',
+        borderRadius: 10,
+        fontWeight: 800, fontSize: 13, letterSpacing: 1.5,
+        cursor: disabled ? 'not-allowed' : 'pointer',
+        transition: 'all 0.2s',
+        background: disabled
+          ? 'rgba(255,255,255,0.05)'
+          : secondary
+            ? `rgba(0,200,255,0.08)`
+            : `linear-gradient(135deg, ${accent}, ${accent === '#00f5ff' ? '#0ea5e9' : '#9333ea'})`,
+        color: disabled ? '#334155' : secondary ? accent : (accent === '#00f5ff' ? '#030912' : '#fff'),
+        boxShadow: disabled || secondary ? 'none' : `0 0 22px ${accent}44`,
+        border: secondary ? `1px solid ${accent}44` : 'none',
+      }}
+    >{children}</button>
+  );
+}
+
+function ErrBox({ msg }) {
   if (!msg) return null;
   return (
     <div style={{
-      background: 'rgba(255,50,50,0.12)', border: '1px solid rgba(255,80,80,0.3)',
+      background: 'rgba(239,68,68,0.07)', border: '1px solid rgba(239,68,68,0.2)',
       borderRadius: 8, padding: '10px 14px',
-      color: '#ff8888', fontSize: 13, width: '100%', textAlign: 'center',
+      color: '#fca5a5', fontSize: 12, textAlign: 'center',
     }}>{msg}</div>
   );
 }
 
-// ─── Tab: Create Room ─────────────────────────────────────────────────────────
+function Divider() {
+  return <div style={{ height: 1, background: 'rgba(255,255,255,0.05)', margin: '4px 0' }} />;
+}
 
-function CreateTab({ onCreateRoom, error, loading, createdCode, onCopyCode }) {
-  const [name, setName]         = useState('');
-  const [pin, setPin]           = useState('');
-  const [roomPass, setRoomPass] = useState('');
-  const [nameStatus, setNameStatus] = useState(null); // null | 'new' | 'returning'
+// ── Create Tab ────────────────────────────────────────────────────────────────
 
-  const checkName = useCallback(async (n) => {
-    if (!n.trim() || n.trim().length < 2) { setNameStatus(null); return; }
-    const HTTP = window.location.origin;
-    // We'll piggy-back on the WS flow via a prop instead
-    // (parent passes checkNameFn)
-  }, []);
-
+function CreateTab({ onCreate, error, loading, createdCode, onCopyCode }) {
+  const savedName = () => { try { return localStorage.getItem('sq_last_name') || ''; } catch { return ''; } };
+  const [name, setName]     = useState(savedName);
+  const [pin, setPin]       = useState('');
+  const [roomPw, setRoomPw] = useState('');
   const ready = name.trim().length >= 2 && pin.length === 4;
 
   const submit = (e) => {
     e.preventDefault();
-    if (ready && !loading) onCreateRoom(name.trim(), pin, roomPass.trim() || null);
+    if (!ready || loading) return;
+    try { localStorage.setItem('sq_last_name', name.trim()); } catch {}
+    onCreate(name.trim(), pin, roomPw.trim() || null);
   };
 
   if (createdCode) {
     return (
-      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 18, width: '100%' }}>
-        <div style={{ fontSize: 13, color: '#88aacc' }}>Room created! Share this code:</div>
+      <div style={{ textAlign: 'center', padding: '8px 0' }}>
+        <div style={{ fontSize: 11, color: '#64748b', marginBottom: 12, letterSpacing: 1 }}>
+          SHARE THIS CODE WITH FRIENDS
+        </div>
         <div style={{
-          fontSize: 52, fontWeight: 900, letterSpacing: 8,
-          background: 'linear-gradient(135deg, #44aaff, #88ffcc)',
+          fontSize: 52, fontWeight: 900, letterSpacing: 10,
+          background: 'linear-gradient(135deg, #00f5ff, #a855f7)',
           WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
-        }}>
-          {createdCode}
-        </div>
-        <button
-          onClick={onCopyCode}
-          style={{ ...btn(true, '#44aaff'), width: 'auto', padding: '8px 24px', fontSize: 13 }}
-        >
-          Copy Code
-        </button>
-        <div style={{ color: '#445', fontSize: 12, textAlign: 'center' }}>
-          Joining now… get ready!
-        </div>
+          marginBottom: 18,
+        }}>{createdCode}</div>
+        <button onClick={onCopyCode} style={{
+          background: 'rgba(0,245,255,0.1)', border: '1px solid rgba(0,245,255,0.3)',
+          borderRadius: 8, padding: '8px 22px', color: '#00f5ff',
+          fontSize: 11, fontWeight: 800, cursor: 'pointer', letterSpacing: 2,
+        }}>COPY CODE</button>
+        <div style={{ marginTop: 14, fontSize: 11, color: '#374151' }}>Entering arena&hellip;</div>
       </div>
     );
   }
 
   return (
-    <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 12, width: '100%' }}>
-      <ErrorBox msg={error} />
-
-      <Input
-        label="YOUR NAME"
-        maxLength={20}
-        placeholder="e.g. ViperKing"
-        value={name}
-        onChange={e => setName(e.target.value)}
-        autoFocus
-      />
-
-      <Input
-        label="4-DIGIT PIN (your account password)"
-        type="password"
-        maxLength={4}
-        placeholder="••••"
-        value={pin}
-        onChange={e => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
-        style={{ ...inputBase, letterSpacing: 6, textAlign: 'center', fontSize: 20 }}
-      />
-
-      <Input
-        label="ROOM PASSWORD (optional)"
-        type="password"
-        maxLength={30}
-        placeholder="Leave blank for public room"
-        value={roomPass}
-        onChange={e => setRoomPass(e.target.value)}
-      />
-
-      <div style={{ fontSize: 11, color: '#556', marginTop: -4 }}>
-        PIN is used to protect your name across sessions. Pick one and remember it.
-      </div>
-
-      <button type="submit" disabled={!ready || loading} style={btn(ready && !loading, '#1a6bff')}>
-        {loading ? 'Creating…' : 'CREATE ROOM'}
-      </button>
+    <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <ErrBox msg={error} />
+      <FInput label="YOUR NAME" placeholder="e.g. VenomKing" maxLength={20}
+        value={name} onChange={e => setName(e.target.value)} autoFocus />
+      <FInput label="4-DIGIT PIN" type="password" placeholder="\u2022\u2022\u2022\u2022" maxLength={4}
+        hint="PIN locks your identity across sessions"
+        style={{ letterSpacing: 8, textAlign: 'center', fontSize: 22 }}
+        value={pin} onChange={e => setPin(e.target.value.replace(/\D/g,'').slice(0,4))} />
+      <FInput label="ROOM PASSWORD (optional)" type="password"
+        placeholder="Leave blank for public room" maxLength={30}
+        value={roomPw} onChange={e => setRoomPw(e.target.value)} />
+      <Btn disabled={!ready || loading}>{loading ? 'Creating\u2026' : 'CREATE ROOM \u2192'}</Btn>
     </form>
   );
 }
 
-// ─── Tab: Join Room ───────────────────────────────────────────────────────────
+// ── Open Rooms Browser ────────────────────────────────────────────────────────
 
-function JoinTab({ onJoinRoom, onCheckRoom, error, loading }) {
+function fmtTimeLeft(ms) {
+  if (!ms || ms <= 0) return 'N/A';
+  const s = Math.floor(ms / 1000);
+  const m = Math.floor(s / 60), sec = s % 60;
+  return `${m}:${String(sec).padStart(2, '0')}`;
+}
+
+function OpenRoomsBrowser({ onSelectRoom }) {
+  const [rooms, setRooms]   = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError]   = useState(null);
+
+  const fetch_ = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const res  = await fetch(`${HTTP_BASE}/api/rooms`);
+      const data = await res.json();
+      setRooms(Array.isArray(data) ? data : []);
+    } catch {
+      setError('Could not reach server');
+      setRooms([]);
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { fetch_(); }, []);
+
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div style={{ fontSize: 9, letterSpacing: 3, color: '#475569', fontWeight: 800 }}>OPEN ROOMS</div>
+        <button onClick={fetch_} style={{
+          background: 'transparent', border: 'none', color: '#00f5ff', fontSize: 11,
+          cursor: 'pointer', fontWeight: 700, letterSpacing: 1,
+        }}>{loading ? '\u21BB' : '\u21BB Refresh'}</button>
+      </div>
+
+      {loading && (
+        <div style={{ textAlign: 'center', padding: '20px', color: '#475569', fontSize: 12 }}>
+          Scanning rooms\u2026
+        </div>
+      )}
+      {error && <div style={{ fontSize: 11, color: '#ef4444', textAlign: 'center' }}>{error}</div>}
+
+      {!loading && rooms !== null && rooms.length === 0 && (
+        <div style={{
+          padding: '20px', textAlign: 'center',
+          background: 'rgba(6,12,26,0.5)', borderRadius: 10,
+          border: '1px solid rgba(255,255,255,0.04)',
+        }}>
+          <div style={{ fontSize: 22, marginBottom: 6 }}>'\uD83C\uDF0C'</div>
+          <div style={{ fontSize: 12, color: '#475569' }}>No open rooms right now</div>
+          <div style={{ fontSize: 10, color: '#334155', marginTop: 4 }}>Create one and invite friends!</div>
+        </div>
+      )}
+
+      {!loading && rooms && rooms.map(r => (
+        <button key={r.code} onClick={() => { audio.click(); onSelectRoom(r.code); }}
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            background: 'rgba(0,200,255,0.04)', border: '1px solid rgba(0,200,255,0.12)',
+            borderRadius: 10, padding: '12px 16px', cursor: 'pointer',
+            transition: 'all 0.2s', textAlign: 'left', width: '100%',
+          }}>
+          <div>
+            <div style={{ fontSize: 16, fontWeight: 900, letterSpacing: 4, color: '#00f5ff', fontFamily: 'monospace' }}>
+              {r.code}
+            </div>
+            <div style={{ fontSize: 10, color: '#475569', marginTop: 2 }}>
+              {r.players} {r.players === 1 ? 'player' : 'players'} &bull; {r.passwordRequired ? '\uD83D\uDD12 Private' : '\uD83D\uDD13 Open'}
+            </div>
+          </div>
+          <div style={{ textAlign: 'right' }}>
+            <div style={{ fontSize: 11, color: '#22c55e', fontWeight: 700 }}>
+              {fmtTimeLeft(r.timeLeftMs)} left
+            </div>
+            <div style={{ fontSize: 9, color: '#334155', marginTop: 2 }}>JOIN \u2192</div>
+          </div>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ── Join Tab ──────────────────────────────────────────────────────────────────
+
+function JoinTab({ onJoin, onCheckRoom, error, loading }) {
+  const savedName = () => { try { return localStorage.getItem('sq_last_name') || ''; } catch { return ''; } };
+  const [mode, setMode]     = useState('code'); // 'code' | 'browse'
   const [code, setCode]     = useState('');
-  const [name, setName]     = useState('');
+  const [name, setName]     = useState(savedName);
   const [pin, setPin]       = useState('');
-  const [roomPass, setRoomPass] = useState('');
-  const [roomInfo, setRoomInfo] = useState(null); // { exists, passwordRequired }
+  const [roomPw, setRoomPw] = useState('');
+  const [info, setInfo]     = useState(null);
   const [checking, setChecking] = useState(false);
 
-  // Auto-check room when 4 chars entered
   useEffect(() => {
     if (code.length === 4) {
       setChecking(true);
-      onCheckRoom(code).then(info => {
-        setRoomInfo(info);
-        setChecking(false);
-      });
-    } else {
-      setRoomInfo(null);
-    }
+      onCheckRoom(code).then(r => { setInfo(r); setChecking(false); });
+    } else { setInfo(null); }
   }, [code]);
 
   const ready = code.length === 4 && name.trim().length >= 2 && pin.length === 4
-    && roomInfo?.exists
-    && (!roomInfo?.passwordRequired || roomPass.length > 0);
+    && info?.exists && (!info?.passwordRequired || roomPw.length > 0);
 
   const submit = (e) => {
     e.preventDefault();
-    if (ready && !loading) onJoinRoom(code, name.trim(), pin, roomPass.trim() || '');
+    if (!ready || loading) return;
+    try { localStorage.setItem('sq_last_name', name.trim()); } catch {}
+    onJoin(code, name.trim(), pin, roomPw.trim() || '');
   };
 
-  return (
-    <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 12, width: '100%' }}>
-      <ErrorBox msg={error} />
+  const tabBtn = (id, label) => (
+    <button onClick={() => { setMode(id); audio.navSwitch(); }}
+      style={{
+        flex: 1, padding: '7px', border: 'none', borderRadius: 7, cursor: 'pointer',
+        fontWeight: 700, fontSize: 10, letterSpacing: 1.5, transition: 'all 0.2s',
+        background: mode === id ? 'rgba(0,200,255,0.12)' : 'transparent',
+        color: mode === id ? '#00f5ff' : '#475569',
+        borderBottom: mode === id ? '2px solid #00f5ff' : '2px solid transparent',
+      }}>{label}</button>
+  );
 
-      {/* Room code */}
-      <div style={{ width: '100%' }}>
-        <div style={{ fontSize: 11, color: '#667', marginBottom: 5, letterSpacing: 1 }}>ROOM CODE</div>
-        <input
-          maxLength={4}
-          placeholder="XXXX"
-          value={code}
-          onChange={e => setCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, '').slice(0, 4))}
-          style={{ ...inputBase, letterSpacing: 8, textAlign: 'center', fontSize: 22, fontWeight: 700 }}
-          autoFocus
-        />
-        {code.length === 4 && (
-          <div style={{ fontSize: 11, marginTop: 5, color: roomInfo ? (roomInfo.exists ? '#88ff88' : '#ff6666') : '#888' }}>
-            {checking ? 'Checking…' : roomInfo?.exists
-              ? (roomInfo.passwordRequired ? '🔒 Room exists — password required' : '✅ Room found — join below')
-              : '❌ Room not found'}
-          </div>
-        )}
+  return (
+    <form onSubmit={submit} style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <ErrBox msg={error} />
+
+      {/* Code / Browse toggle */}
+      <div style={{ display: 'flex', gap: 4, background: 'rgba(8,16,32,0.6)', borderRadius: 8, padding: 3 }}>
+        {tabBtn('code',   'ENTER CODE')}
+        {tabBtn('browse', 'BROWSE ROOMS')}
       </div>
 
-      <Input
-        label="YOUR NAME"
-        maxLength={20}
-        placeholder="e.g. ViperKing"
-        value={name}
-        onChange={e => setName(e.target.value)}
-      />
-
-      <Input
-        label="YOUR PIN"
-        type="password"
-        maxLength={4}
-        placeholder="••••"
-        value={pin}
-        onChange={e => setPin(e.target.value.replace(/\D/g, '').slice(0, 4))}
-        style={{ ...inputBase, letterSpacing: 6, textAlign: 'center', fontSize: 20 }}
-      />
-
-      {roomInfo?.passwordRequired && (
-        <Input
-          label="ROOM PASSWORD"
-          type="password"
-          maxLength={30}
-          placeholder="Enter room password"
-          value={roomPass}
-          onChange={e => setRoomPass(e.target.value)}
-          style={{ ...inputBase, borderColor: 'rgba(255,200,100,0.35)' }}
-        />
+      {mode === 'browse' ? (
+        <OpenRoomsBrowser onSelectRoom={(c) => { setCode(c); setMode('code'); }} />
+      ) : (
+        <>
+          {/* Code input */}
+          <div style={{ width: '100%' }}>
+            <div style={{ fontSize: 9, fontWeight: 800, letterSpacing: 3, color: '#475569', marginBottom: 7 }}>ROOM CODE</div>
+            <input autoFocus maxLength={4} placeholder="X X X X"
+              value={code}
+              onChange={e => setCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g,'').slice(0,4))}
+              style={{ ...inputStyle, letterSpacing: 10, textAlign: 'center', fontSize: 26, fontWeight: 900 }}
+            />
+            {code.length === 4 && (
+              <div style={{
+                fontSize: 11, marginTop: 6,
+                color: info ? (info.exists ? '#22c55e' : '#ef4444') : '#475569',
+              }}>
+                {checking ? '\u23F3 Checking\u2026'
+                  : info?.exists
+                    ? (info.passwordRequired ? '\uD83D\uDD12 Room found \u2014 password required' : '\u2705 Room found \u2014 join below')
+                    : '\u2717 Room not found'}
+              </div>
+            )}
+          </div>
+        </>
       )}
 
-      <button type="submit" disabled={!ready || loading} style={btn(ready && !loading, '#7733ff')}>
-        {loading ? 'Joining…' : 'JOIN ROOM'}
-      </button>
+      {/* Player fields (always shown) */}
+      {mode === 'code' && (
+        <>
+          <FInput label="YOUR NAME" placeholder="e.g. VenomKing" maxLength={20}
+            value={name} onChange={e => setName(e.target.value)} />
+          <FInput label="YOUR PIN" type="password" placeholder="\u2022\u2022\u2022\u2022" maxLength={4}
+            style={{ letterSpacing: 8, textAlign: 'center', fontSize: 22 }}
+            value={pin} onChange={e => setPin(e.target.value.replace(/\D/g,'').slice(0,4))} />
+          {info?.passwordRequired && (
+            <FInput label="ROOM PASSWORD" type="password"
+              placeholder="Enter room password" maxLength={30}
+              value={roomPw} onChange={e => setRoomPw(e.target.value)} />
+          )}
+          <Btn disabled={!ready || loading} accent="#a855f7">
+            {loading ? 'Joining\u2026' : 'JOIN ROOM \u2192'}
+          </Btn>
+        </>
+      )}
     </form>
   );
 }
 
-// ─── Lobby root ───────────────────────────────────────────────────────────────
+// ── Play Section ──────────────────────────────────────────────────────────────
 
-export default function LobbyScreen({ onCreate, onJoin, onCheckRoom, error, loading, createdCode }) {
-  const [tab, setTab] = useState('create'); // 'create' | 'join'
-
-  const handleCopyCode = () => {
-    navigator.clipboard.writeText(createdCode).catch(() => {});
-  };
-
-  const tabStyle = (t) => ({
-    flex: 1, padding: '10px', border: 'none', borderRadius: 8,
-    cursor: 'pointer', fontWeight: 700, fontSize: 13, transition: 'all 0.2s',
-    background: tab === t ? 'rgba(100,200,255,0.15)' : 'transparent',
-    color: tab === t ? '#88ddff' : '#556',
-    borderBottom: tab === t ? '2px solid #44aaff' : '2px solid transparent',
-  });
+function PlaySection({ onCreate, onJoin, onCheckRoom, error, loading, createdCode }) {
+  const [sub, setSub] = useState('create');
 
   return (
-    <div style={{
-      position: 'absolute', inset: 0,
-      display: 'flex', alignItems: 'center', justifyContent: 'center',
-      background: 'radial-gradient(ellipse at center, #0d1b2a 0%, #0a0a14 100%)',
-      zIndex: 100,
-    }}>
-      {/* Grid bg */}
-      <svg style={{ position: 'absolute', inset: 0, opacity: 0.04 }} width="100%" height="100%">
-        <defs>
-          <pattern id="g" width="80" height="80" patternUnits="userSpaceOnUse">
-            <path d="M 80 0 L 0 0 0 80" fill="none" stroke="white" strokeWidth="1"/>
-          </pattern>
-        </defs>
-        <rect width="100%" height="100%" fill="url(#g)" />
-      </svg>
-
-      <div style={card}>
-        {/* Title */}
-        <div style={{ textAlign: 'center' }}>
-          <div style={{
-            fontSize: 38, fontWeight: 900, letterSpacing: -1,
-            background: 'linear-gradient(135deg, #44aaff, #88ffcc)',
-            WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
-          }}>
-            SLITHER QUEST
-          </div>
-          <div style={{ color: '#445', fontSize: 12, marginTop: 4 }}>
-            Eat &bull; Grow &bull; Outlast
-          </div>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 18 }}>
+      {!createdCode && (
+        <div style={{ display: 'flex', gap: 4, background: 'rgba(8,16,32,0.7)', borderRadius: 10, padding: 4 }}>
+          {['create', 'join'].map(id => (
+            <button key={id} onClick={() => { setSub(id); audio.navSwitch(); }}
+              style={{
+                flex: 1, padding: '10px', border: 'none', borderRadius: 8, cursor: 'pointer',
+                fontWeight: 800, fontSize: 11, letterSpacing: 2, transition: 'all 0.2s',
+                background: sub === id ? 'rgba(0,245,255,0.1)' : 'transparent',
+                color: sub === id ? '#00f5ff' : '#475569',
+                borderBottom: sub === id ? '2px solid #00f5ff' : '2px solid transparent',
+              }}>
+              {id === 'create' ? 'CREATE ROOM' : 'JOIN ROOM'}
+            </button>
+          ))}
         </div>
+      )}
 
-        {/* Tabs */}
-        {!createdCode && (
-          <div style={{ display: 'flex', width: '100%', gap: 4, background: 'rgba(255,255,255,0.04)', borderRadius: 10, padding: 4 }}>
-            <button style={tabStyle('create')} onClick={() => setTab('create')}>CREATE ROOM</button>
-            <button style={tabStyle('join')} onClick={() => setTab('join')}>JOIN ROOM</button>
-          </div>
-        )}
+      {(sub === 'create' || createdCode) && (
+        <CreateTab onCreate={onCreate} error={sub === 'create' ? error : null}
+          loading={loading && sub === 'create'} createdCode={createdCode}
+          onCopyCode={() => { navigator.clipboard.writeText(createdCode).catch(() => {}); audio.click(); }} />
+      )}
+      {sub === 'join' && !createdCode && (
+        <JoinTab onJoin={onJoin} onCheckRoom={onCheckRoom} error={error} loading={loading} />
+      )}
 
-        {/* Tab content */}
-        {(tab === 'create' || createdCode) && (
-          <CreateTab
-            onCreateRoom={onCreate}
-            error={tab === 'create' ? error : null}
-            loading={loading && tab === 'create'}
-            createdCode={createdCode}
-            onCopyCode={handleCopyCode}
-          />
-        )}
-        {tab === 'join' && !createdCode && (
-          <JoinTab
-            onJoinRoom={onJoin}
-            onCheckRoom={onCheckRoom}
-            error={error}
-            loading={loading}
-          />
-        )}
-
-        {/* Tips */}
-        {!createdCode && (
-          <div style={{ color: '#334', fontSize: 11, textAlign: 'center', lineHeight: 2 }}>
-            Steer: mouse or WASD / arrows &nbsp;·&nbsp; Boost: hold click or space
-          </div>
-        )}
+      <div style={{ textAlign: 'center', fontSize: 10, color: '#1e293b', lineHeight: 2, letterSpacing: 0.5 }}>
+        Steer: mouse / WASD / arrows &nbsp;&bull;&nbsp; Boost: hold click or space
+        &nbsp;&bull;&nbsp; 5-min rounds
       </div>
+    </div>
+  );
+}
+
+// ── Panel wrapper ─────────────────────────────────────────────────────────────
+
+function Panel({ children }) {
+  return (
+    <div style={{
+      background: 'rgba(4,9,22,0.9)',
+      border: '1px solid rgba(0,200,255,0.1)',
+      borderRadius: 18, padding: '30px 32px',
+      backdropFilter: 'blur(24px)',
+      boxShadow: '0 0 60px rgba(0,100,255,0.05), 0 24px 60px rgba(0,0,0,0.4)',
+    }}>
+      {children}
+    </div>
+  );
+}
+
+// ── Main Lobby ────────────────────────────────────────────────────────────────
+
+export default function LobbyScreen({
+  onCreate, onJoin, onCheckRoom,
+  error, loading, createdCode,
+  stats, unlocked, playerName, pin,
+}) {
+  const [section, setSection] = useState('play');
+  const [muted,   setMuted]   = useState(false);
+
+  const switchSection = (id) => { audio.navSwitch(); audio.resume(); setSection(id); };
+  const toggleMute = () => {
+    const next = !muted;
+    setMuted(next);
+    audio.setMuted(next);
+    audio.click();
+  };
+
+  return (
+    <div style={{ position: 'absolute', inset: 0, display: 'flex', flexDirection: 'column' }}>
+      <AnimatedBg />
+
+      <div style={{ position: 'relative', zIndex: 1, display: 'flex', flexDirection: 'column', height: '100%' }}>
+
+        {/* ── Top bar ── */}
+        <header style={{
+          padding: '14px 24px',
+          display: 'flex', alignItems: 'center', gap: 16,
+          borderBottom: '1px solid rgba(0,200,255,0.07)',
+          backdropFilter: 'blur(12px)',
+          background: 'rgba(2,5,14,0.6)',
+          flexShrink: 0,
+          flexWrap: 'wrap',
+        }}>
+          {/* Logo */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginRight: 8 }}>
+            <span style={{ fontSize: 26 }}>🐍</span>
+            <div>
+              <div style={{
+                fontSize: 18, fontWeight: 900, letterSpacing: -0.5,
+                background: 'linear-gradient(135deg, #00f5ff, #a855f7)',
+                WebkitBackgroundClip: 'text', WebkitTextFillColor: 'transparent',
+              }}>SLITHER QUEST</div>
+              <div style={{ fontSize: 9, color: '#334155', letterSpacing: 2 }}>EAT &bull; GROW &bull; OUTLAST</div>
+            </div>
+          </div>
+
+          {/* Nav */}
+          <nav style={{ display: 'flex', gap: 2, flex: 1, justifyContent: 'center' }}>
+            {SECTIONS.map(s => (
+              <button key={s.id} onClick={() => switchSection(s.id)}
+                style={{
+                  padding: '7px 14px', border: 'none', borderRadius: 8,
+                  cursor: 'pointer', fontWeight: 700, fontSize: 10, letterSpacing: 1.5,
+                  transition: 'all 0.2s',
+                  background: section === s.id ? 'rgba(0,245,255,0.1)' : 'transparent',
+                  color: section === s.id ? '#00f5ff' : '#475569',
+                  borderBottom: section === s.id ? '2px solid #00f5ff' : '2px solid transparent',
+                }}>
+                {s.icon} {s.label}
+              </button>
+            ))}
+          </nav>
+
+          {/* Mute toggle */}
+          <button onClick={toggleMute}
+            style={{
+              background: muted ? 'rgba(239,68,68,0.1)' : 'rgba(0,245,255,0.07)',
+              border: muted ? '1px solid rgba(239,68,68,0.25)' : '1px solid rgba(0,245,255,0.15)',
+              borderRadius: 8, padding: '7px 12px', cursor: 'pointer',
+              color: muted ? '#ef4444' : '#00f5ff', fontSize: 16, transition: 'all 0.2s',
+            }}
+            title={muted ? 'Unmute' : 'Mute'}
+          >{muted ? '\uD83D\uDD07' : '\uD83D\uDD0A'}</button>
+        </header>
+
+        {/* ── Content ── */}
+        <main style={{
+          flex: 1, overflowY: 'auto',
+          display: 'flex', justifyContent: 'center',
+          padding: '28px 16px 48px',
+        }}>
+          <div style={{ width: '100%', maxWidth: section === 'play' ? 430 : 650 }}>
+            {section === 'play' && (
+              <Panel>
+                <PlaySection onCreate={onCreate} onJoin={onJoin} onCheckRoom={onCheckRoom}
+                  error={error} loading={loading} createdCode={createdCode} />
+              </Panel>
+            )}
+            {section === 'profile' && <ProfilePanel stats={stats} unlocked={unlocked} />}
+            {section === 'arena'   && <ArenaPanel playerName={playerName} pin={pin} />}
+            {section === 'hall'    && <HallOfFame stats={stats} />}
+          </div>
+        </main>
+      </div>
+
+      <style>{`
+        ::-webkit-scrollbar { width: 4px; }
+        ::-webkit-scrollbar-track { background: transparent; }
+        ::-webkit-scrollbar-thumb { background: rgba(0,200,255,0.15); border-radius: 4px; }
+      `}</style>
     </div>
   );
 }
