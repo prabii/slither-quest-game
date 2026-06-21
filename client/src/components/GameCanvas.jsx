@@ -323,45 +323,158 @@ export default function GameCanvas({ snapshot, playerId, onInput, active }) {
 
 // ─── Mini-map ─────────────────────────────────────────────────────────────────
 
+function roundRect(ctx, x, y, w, h, r) {
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.lineTo(x + w - r, y);
+  ctx.quadraticCurveTo(x + w, y, x + w, y + r);
+  ctx.lineTo(x + w, y + h - r);
+  ctx.quadraticCurveTo(x + w, y + h, x + w - r, y + h);
+  ctx.lineTo(x + r, y + h);
+  ctx.quadraticCurveTo(x, y + h, x, y + h - r);
+  ctx.lineTo(x, y + r);
+  ctx.quadraticCurveTo(x, y, x + r, y);
+  ctx.closePath();
+}
+
 function drawMinimap(ctx, snap, mySnake, cw, ch) {
-  const SIZE = 140;
+  const SIZE = 180;
   const PAD = 16;
+  const R = 12;
   const mx = cw - SIZE - PAD;
   const my = ch - SIZE - PAD;
   const scale = SIZE / snap.worldSize;
 
   ctx.save();
-  ctx.globalAlpha = 0.75;
 
-  // Background
-  ctx.fillStyle = '#0a0a20';
-  ctx.strokeStyle = '#333';
-  ctx.lineWidth = 1;
+  // Clip to rounded rect
+  roundRect(ctx, mx, my, SIZE, SIZE, R);
+  ctx.clip();
+
+  // Dark background
+  ctx.globalAlpha = 0.88;
+  ctx.fillStyle = 'rgba(4, 8, 24, 0.95)';
   ctx.fillRect(mx, my, SIZE, SIZE);
-  ctx.strokeRect(mx, my, SIZE, SIZE);
 
-  // Pellets (dots)
-  ctx.fillStyle = '#555';
-  for (const [, px, py] of snap.pellets) {
-    ctx.fillRect(mx + px * scale - 0.5, my + py * scale - 0.5, 1, 1);
+  // Subtle grid
+  ctx.globalAlpha = 0.1;
+  ctx.strokeStyle = '#00f5ff';
+  ctx.lineWidth = 0.5;
+  const step = SIZE / 4;
+  ctx.beginPath();
+  for (let i = 1; i < 4; i++) {
+    ctx.moveTo(mx + i * step, my);
+    ctx.lineTo(mx + i * step, my + SIZE);
+    ctx.moveTo(mx, my + i * step);
+    ctx.lineTo(mx + SIZE, my + i * step);
+  }
+  ctx.stroke();
+
+  // World border hint
+  ctx.globalAlpha = 0.3;
+  ctx.strokeStyle = '#ff3355';
+  ctx.lineWidth = 1.5;
+  ctx.strokeRect(mx + 1, my + 1, SIZE - 2, SIZE - 2);
+
+  // Pellets — colored dots
+  ctx.globalAlpha = 0.65;
+  for (const [, px, py, hue] of snap.pellets) {
+    ctx.fillStyle = `hsl(${hue ?? 180},100%,72%)`;
+    ctx.fillRect(mx + px * scale - 1, my + py * scale - 1, 2, 2);
   }
 
-  // Snakes
+  // Other snakes
+  ctx.globalAlpha = 0.9;
   for (const s of snap.snakes) {
+    if (s.id === mySnake?.id) continue;
+    const sx = mx + s.x * scale;
+    const sy = my + s.y * scale;
     ctx.beginPath();
-    ctx.arc(mx + s.x * scale, my + s.y * scale, s.id === mySnake?.id ? 3 : 2, 0, Math.PI * 2);
+    ctx.arc(sx, sy, 2.5, 0, Math.PI * 2);
     ctx.fillStyle = s.color;
     ctx.fill();
   }
 
-  // Own snake highlight
+  // Viewport rect (shows what the player can see)
   if (mySnake) {
+    const vx = mx + (mySnake.x - cw / 2) * scale;
+    const vy = my + (mySnake.y - ch / 2) * scale;
+    const vw = cw * scale;
+    const vh = ch * scale;
+    ctx.globalAlpha = 0.15;
+    ctx.fillStyle = '#00f5ff';
+    ctx.fillRect(vx, vy, vw, vh);
+    ctx.globalAlpha = 0.5;
+    ctx.strokeStyle = '#00f5ff';
+    ctx.lineWidth = 0.8;
+    ctx.strokeRect(vx, vy, vw, vh);
+  }
+
+  // Own snake — glowing white dot + direction arrow
+  if (mySnake) {
+    const sx = mx + mySnake.x * scale;
+    const sy = my + mySnake.y * scale;
+    const dir = mySnake.dir ?? 0;
+
+    // Glow halo
+    ctx.globalAlpha = 0.35;
+    ctx.shadowColor = '#ffffff';
+    ctx.shadowBlur = 8;
     ctx.beginPath();
-    ctx.arc(mx + mySnake.x * scale, my + mySnake.y * scale, 4, 0, Math.PI * 2);
-    ctx.fillStyle = '#fff';
+    ctx.arc(sx, sy, 6, 0, Math.PI * 2);
+    ctx.fillStyle = 'rgba(255,255,255,0.15)';
+    ctx.fill();
+
+    // White dot
+    ctx.globalAlpha = 1;
+    ctx.shadowBlur = 6;
+    ctx.beginPath();
+    ctx.arc(sx, sy, 3.5, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.fill();
+
+    // Direction arrow
+    ctx.shadowBlur = 0;
+    ctx.globalAlpha = 0.95;
+    const arrowLen = 7;
+    const arrowW = 2.5;
+    const tip = { x: sx + Math.cos(dir) * (arrowLen + 4), y: sy + Math.sin(dir) * (arrowLen + 4) };
+    const l   = { x: sx + Math.cos(dir + 2.5) * arrowW, y: sy + Math.sin(dir + 2.5) * arrowW };
+    const r2  = { x: sx + Math.cos(dir - 2.5) * arrowW, y: sy + Math.sin(dir - 2.5) * arrowW };
+    ctx.beginPath();
+    ctx.moveTo(tip.x, tip.y);
+    ctx.lineTo(l.x, l.y);
+    ctx.lineTo(r2.x, r2.y);
+    ctx.closePath();
+    ctx.fillStyle = '#00f5ff';
     ctx.fill();
   }
 
-  ctx.globalAlpha = 1;
+  ctx.restore();
+
+  // Glowing border (drawn outside clip)
+  ctx.save();
+  ctx.shadowColor = '#00c8ff';
+  ctx.shadowBlur = 12;
+  ctx.strokeStyle = 'rgba(0, 200, 255, 0.85)';
+  ctx.lineWidth = 1.5;
+  roundRect(ctx, mx, my, SIZE, SIZE, R);
+  ctx.stroke();
+  ctx.shadowBlur = 0;
+
+  // "MAP" label
+  ctx.globalAlpha = 0.7;
+  ctx.fillStyle = '#00f5ff';
+  ctx.font = 'bold 8px monospace';
+  ctx.textAlign = 'left';
+  ctx.fillText('MAP', mx + 9, my + 14);
+
+  // Player count badge
+  ctx.globalAlpha = 0.5;
+  ctx.fillStyle = '#94a3b8';
+  ctx.font = 'bold 8px monospace';
+  ctx.textAlign = 'right';
+  ctx.fillText(`${snap.snakes.length}P`, mx + SIZE - 9, my + 14);
+
   ctx.restore();
 }
